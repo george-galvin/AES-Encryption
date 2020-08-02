@@ -160,7 +160,7 @@ void make_key_schedule(array<u8, 16> key)
     }
 }
 
-array<u8, 16> encrypt_message(array<u8, 16> input)
+array<u8, 16> encrypt_block(array<u8, 16> block)
 {
     array<u8, 16>round_key;
 
@@ -168,7 +168,7 @@ array<u8, 16> encrypt_message(array<u8, 16> input)
     memcpy(&round_key, &key_schedule, 16);
     for (int i = 0; i < 16; i++)
     {
-        input[i] ^= round_key[i];
+        block[i] ^= round_key[i];
     }
     //Step 1..10
     for (int round = 1; round <= 10; round++)
@@ -176,18 +176,18 @@ array<u8, 16> encrypt_message(array<u8, 16> input)
         //"SubBytes" - perform the S-box transformation
         for (int i = 0; i < 16; i++)
         {
-            input[i] = sbox[input[i]];
+            block[i] = sbox[block[i]];
         }
 
         //The next two steps are done treating the block as a 4x4 matrix, filling columns first, then rows
         //"ShiftRows" - does a left shift on row x (where x goes from 0 to 3) by x bytes.
         for (int i = 0; i < 4; i++)
         {
-            array<u8, 4> newrow = lcs_4byte({ input[i], input[i + 4], input[i + 8], input[i + 12] }, i);
-            input[i] = newrow[0];
-            input[i + 4] = newrow[1];
-            input[i + 8] = newrow[2];
-            input[i + 12] = newrow[3];
+            array<u8, 4> newrow = lcs_4byte({ block[i], block[i + 4], block[i + 8], block[i + 12] }, i);
+            block[i] = newrow[0];
+            block[i + 4] = newrow[1];
+            block[i + 8] = newrow[2];
+            block[i + 12] = newrow[3];
         }
         //"MixColumns" - a linear transformation on each column
         if (round != 10)
@@ -195,11 +195,11 @@ array<u8, 16> encrypt_message(array<u8, 16> input)
             for (int i = 0; i < 4; i++)
             {
                 array <u8, 4> mix;
-                mix[0] = rijndael_multiply(2, input[4 * i]) ^ rijndael_multiply(3, input[4 * i + 1]) ^ input[4 * i + 2] ^ input[4 * i + 3];
-                mix[1] = input[4 * i] ^ rijndael_multiply(2, input[4 * i + 1]) ^ rijndael_multiply(3, input[4 * i + 2]) ^ input[4 * i + 3];
-                mix[2] = input[4 * i] ^ input[4 * i + 1] ^ rijndael_multiply(2, input[4 * i + 2]) ^ rijndael_multiply(3, input[4 * i + 3]);
-                mix[3] = rijndael_multiply(3, input[4 * i]) ^ input[4 * i + 1] ^ input[4 * i + 2] ^ rijndael_multiply(2, input[4 * i + 3]);
-                memcpy(&input[4 * i], &mix, 4);
+                mix[0] = rijndael_multiply(2, block[4 * i]) ^ rijndael_multiply(3, block[4 * i + 1]) ^ block[4 * i + 2] ^ block[4 * i + 3];
+                mix[1] = block[4 * i] ^ rijndael_multiply(2, block[4 * i + 1]) ^ rijndael_multiply(3, block[4 * i + 2]) ^ block[4 * i + 3];
+                mix[2] = block[4 * i] ^ block[4 * i + 1] ^ rijndael_multiply(2, block[4 * i + 2]) ^ rijndael_multiply(3, block[4 * i + 3]);
+                mix[3] = rijndael_multiply(3, block[4 * i]) ^ block[4 * i + 1] ^ block[4 * i + 2] ^ rijndael_multiply(2, block[4 * i + 3]);
+                memcpy(&block[4 * i], &mix, 4);
             }
         }
 
@@ -207,10 +207,10 @@ array<u8, 16> encrypt_message(array<u8, 16> input)
         memcpy(&round_key, &key_schedule[round * 16], 16);
         for (int i = 0; i < 16; i++)
         {
-            input[i] ^= round_key[i];
+            block[i] ^= round_key[i];
         }
     }
-    return input;
+    return block;
 }
 
 array<u8, 16> user_key;
@@ -250,7 +250,7 @@ int main(int argc, char **argv)
     make_key_schedule(user_key); //Generate the round keys
 
     char buffer[16];
-    array<u8, 16> block;
+    array<u8, 16> current_block;
     output_file.open(output_filename);
     while (input_file)
     {
@@ -273,10 +273,10 @@ int main(int argc, char **argv)
         }
         for (int i = 0; i < 16; i++)
         {   //convert from signed to unsigned char
-            block[i] = (u8)buffer[i];
+            current_block[i] = (u8)buffer[i];
         }
         
-        array<u8, 16> encrypt = encrypt_message(block);
+        array<u8, 16> encrypt = encrypt_block(current_block);
         for (int i = 0; i < 16; i++)
         {   //write encrypted block to the output file as hex characters
             output_file << hex << int(encrypt[i]);
