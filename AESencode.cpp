@@ -164,13 +164,13 @@ array<u8, 16> encrypt_block(array<u8, 16> block)
 {
     array<u8, 16>round_key;
 
-    //Step 0
+    //Round 0
     memcpy(&round_key, &key_schedule, 16);
     for (int i = 0; i < 16; i++)
     {
         block[i] ^= round_key[i];
     }
-    //Step 1..10
+    //Round 1..10
     for (int round = 1; round <= 10; round++)
     {
         //"SubBytes" - perform the S-box transformation
