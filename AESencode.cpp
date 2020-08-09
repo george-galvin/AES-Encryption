@@ -13,21 +13,22 @@ Todo:
 */
 
 #include <iostream> //user dialog
+#include <iomanip>
 #include <fstream> //input + output data
 #include <string> //convert input to hex
-#include <array> //allows functions to return arrays 
+#include <array> //allow functions to return arrays 
 
 using namespace std;
 
 typedef unsigned char u8;
 typedef unsigned int u32;
 
-//In AES, bytes are not treated as integers but part of a 
-//"Galois field", a finite set of numbers with substitutes for addition
-//and multiplication such that the results remain within the set.
-//Specifically we use Rijndael's field, which contains 0-255 (2**8 - 1),
-//and where addition is replaced by xor. Multiplication uses the standard binary
-//multiplication method, but with xor instead of + and modulo 0x11b.
+/*In AES, bytes are not treated as integers but part of a 
+  "Galois field", a finite set of numbers with substitutes for addition
+  and multiplication such that the results remain within the set.
+  Specifically we use Rijndael's field, which contains 0-255 (2**8 - 1),
+  and where addition is replaced by xor. Multiplication uses the standard binary
+  multiplication method, but with xor instead of + and modulo 0x11b. */
 u8 rijndael_multiply(u8 a, u8 b)
 {
     const int reducing_num = 0x11b;
@@ -89,11 +90,15 @@ u8 sbox_value(u8 input)
 
 //store the s-box as an array rather than a function
 u8 sbox[256];
+u8 inverse_sbox[256];
 void make_sbox_array()
 {
+    u8 s;
     for (int i = 0; i <= 0xff; i++)
     {
-        sbox[i] = sbox_value(i);
+        s = sbox_value(i);
+        sbox[i] = s;
+        inverse_sbox[s] = i;
     }
 }
 
@@ -143,7 +148,7 @@ void make_key_schedule(array<u8, 16> key)
                 array<u8, 4> rot = lcs_4byte(o1, 1);
                 array<u8, 4> s = { sbox[rot[0]], sbox[rot[1]], sbox[rot[2]], sbox[rot[3]] };
                 array<u8, 4> rc_array = { round_constant(i / 4), 0x00, 0x00, 0x00 };
-                for (int j = 0; j < 4; j++)
+                 for (int j = 0; j < 4; j++)
                 {
                     key_schedule[4 * i + j] = o4[j] ^ s[j] ^ (rc_array[j]);
                 }
@@ -162,7 +167,7 @@ void make_key_schedule(array<u8, 16> key)
 
 array<u8, 16> encrypt_block(array<u8, 16> block)
 {
-    array<u8, 16>round_key;
+    array<u8, 16> round_key;
 
     //Round 0
     memcpy(&round_key, &key_schedule, 16);
@@ -170,6 +175,7 @@ array<u8, 16> encrypt_block(array<u8, 16> block)
     {
         block[i] ^= round_key[i];
     }
+
     //Round 1..10
     for (int round = 1; round <= 10; round++)
     {
@@ -210,6 +216,69 @@ array<u8, 16> encrypt_block(array<u8, 16> block)
             block[i] ^= round_key[i];
         }
     }
+
+    for (int i = 0; i < 16; i++)
+    {
+        cout << hex << int(block[i]) << " ";
+    }
+    cout << endl;
+
+    return block;
+}
+
+array<u8, 16> decrypt_block(array<u8, 16> block)
+{
+    array<u8, 16> round_key;
+    memcpy(&round_key, &key_schedule[160], 16);
+    for (int round = 1; round <= 10; round++)
+    {
+        //AddRoundKey is its own inverse, as xor with a number is its own inverse
+        memcpy(&round_key, &key_schedule[160 - (16 * (round - 1))], 16);
+        for (int i = 0; i < 16; i++)
+        {
+            block[i] ^= round_key[i];
+        }
+
+        //MixColumns inverse - the original matrix's inverse in the Rijndael field
+        if (round != 1)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                array <u8, 4> mix;
+                mix[0] = rijndael_multiply(14, block[4 * i]) ^ rijndael_multiply(11, block[4 * i + 1])
+                    ^ rijndael_multiply(13, block[4 * i + 2]) ^ rijndael_multiply(9, block[4 * i + 3]);
+                mix[1] = rijndael_multiply(9, block[4 * i]) ^ rijndael_multiply(14, block[4 * i + 1])
+                    ^ rijndael_multiply(11, block[4 * i + 2]) ^ rijndael_multiply(13, block[4 * i + 3]);
+                mix[2] = rijndael_multiply(13, block[4 * i]) ^ rijndael_multiply(9, block[4 * i + 1])
+                    ^ rijndael_multiply(14, block[4 * i + 2]) ^ rijndael_multiply(11, block[4 * i + 3]);
+                mix[3] = rijndael_multiply(11, block[4 * i]) ^ rijndael_multiply(13, block[4 * i + 1])
+                    ^ rijndael_multiply(9, block[4 * i + 2]) ^ rijndael_multiply(14, block[4 * i + 3]);
+                memcpy(&block[4 * i], &mix, 4);
+            }
+        }
+
+        //ShiftRows inverse
+        for (int i = 0; i < 4; i++)
+        {
+            array<u8, 4> newrow = lcs_4byte({ block[i], block[i + 4], block[i + 8], block[i + 12] }, 4 - i);
+            block[i] = newrow[0];
+            block[i + 4] = newrow[1];
+            block[i + 8] = newrow[2];
+            block[i + 12] = newrow[3];
+        }
+
+        //SubBytes inverse
+        for (int i = 0; i < 16; i++)
+        {
+            block[i] = inverse_sbox[block[i]];
+        }
+    }
+
+    memcpy(&round_key, &key_schedule, 16);
+    for (int i = 0; i < 16; i++)
+    {
+        block[i] ^= round_key[i];
+    }
     return block;
 }
 
@@ -217,10 +286,18 @@ array<u8, 16> user_key;
 int main(int argc, char **argv)
 {
     make_sbox_array();
-
+    
     ifstream input_file;
     ofstream output_file;
     string input_filename, output_filename;
+
+    string mode;
+    do //Mode input loop
+    {
+        cout << "Encrypt or decrypt? (E/D): ";
+        cin >> mode;
+    } while (!(mode == "E" || mode == "D"));
+
     do
     { //File input loop
         cout << endl << "Enter a file name: ";
@@ -229,7 +306,9 @@ int main(int argc, char **argv)
     } while (input_file.fail());
 
     int dot_pos = input_filename.find('.'); //append _aes to the name, for the encrypted output file
-    output_filename = input_filename.substr(0, dot_pos) + "_aes" + input_filename.substr(dot_pos);
+
+    output_filename = input_filename.substr(0, dot_pos) + 
+       (mode == "E" ? "_encrypted" : "_decrypted") + input_filename.substr(dot_pos);
 
     string key_input;
     do //Key input loop
@@ -245,19 +324,21 @@ int main(int argc, char **argv)
         user_key[i] = stoi(key_input.substr(2 * i, 2), nullptr, 16);
     }
 
-    cout << endl << "Encrypting..." << endl;
+    cout << endl << (mode == "E" ? "Encrypting..." : "Decrypting...") << endl;
 
     make_key_schedule(user_key); //Generate the round keys
 
-    char buffer[16];
+    int chars_per_block = (mode == "E" ? 16 : 32);
+    char buffer[32];
     array<u8, 16> current_block;
     output_file.open(output_filename);
     while (input_file)
     {
         //Read the input file, in blocks 16 characters at a time
-        input_file.read(buffer, 16);
+        input_file.read(buffer, chars_per_block);
         if (!input_file)
         {   //If the file ends before 16 characters, fill the rest of the block with zeros
+            //(this should only happen with encrypt mode).
             int chars_left = input_file.gcount();
             if (chars_left == 0)
             {
@@ -271,19 +352,36 @@ int main(int argc, char **argv)
                 }
             }
         }
-        for (int i = 0; i < 16; i++)
-        {   //convert from signed to unsigned char
-            current_block[i] = (u8)buffer[i];
+        if (mode == "E") //encryption mode
+        {
+            for (int i = 0; i < 16; i++)
+            {   //convert from signed to unsigned char
+                current_block[i] = (u8)buffer[i];
+            }
+
+            array<u8, 16> encrypt = encrypt_block(current_block);
+            for (int i = 0; i < 16; i++)
+            {   //write encrypted block to the output file as hex characters
+                output_file << setfill('0') << setw(2) << hex << int(encrypt[i]);
+            }
         }
-        
-        array<u8, 16> encrypt = encrypt_block(current_block);
-        for (int i = 0; i < 16; i++)
-        {   //write encrypted block to the output file as hex characters
-            output_file << hex << int(encrypt[i]);
+        else //decryption mode
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                current_block[i] = (u8) stoi(string({ buffer[2 * i], buffer[2 * i + 1] }), nullptr, 16);
+            }
+            array<u8, 16> decrypt = decrypt_block(current_block);
+            for (int i = 0; i < 16; i++)
+            {   //write decrypted block to the output file
+                output_file << (char)decrypt[i];
+            }
         }
     }
     input_file.close();
     output_file.close();
 
     cout << "Completed!" << endl;
+    return 0;
 }
+    
